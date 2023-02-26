@@ -28,7 +28,7 @@ import sys
 
 from ..ylib2to3 import pytree
 
-from yapf.yapflib import pytree_utils
+from yapf.pytree import pytree_utils
 
 
 class PyTreeVisitor(object):

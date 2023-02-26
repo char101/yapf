@@ -11,10 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Pytree nodes with extra formatting information.
-
-This is a thin wrapper around a pytree.Leaf node.
-"""
+"""Enhanced token information for formatting."""
 
 import keyword
 import re
@@ -22,45 +19,15 @@ import re
 from ..ylib2to3.pgen2 import token
 from ..ylib2to3.pytree import type_repr
 
+from yapf.pytree import pytree_utils
 from yapf.yapflib import py3compat
-from yapf.yapflib import pytree_utils
 from yapf.yapflib import style
+from yapf.yapflib import subtypes
 
 CONTINUATION = token.N_TOKENS
 
-
-class Subtype(object):
-  """Subtype information about tokens.
-
-  Gleaned from parsing the code. Helps determine the best formatting.
-  """
-  NONE = 0
-  UNARY_OPERATOR = 1
-  BINARY_OPERATOR = 2
-  A_EXPR_OPERATOR = 3
-  M_EXPR_OPERATOR = 4
-  SUBSCRIPT_COLON = 5
-  SUBSCRIPT_BRACKET = 6
-  DEFAULT_OR_NAMED_ASSIGN = 7
-  DEFAULT_OR_NAMED_ASSIGN_ARG_LIST = 8
-  VARARGS_LIST = 9
-  VARARGS_STAR = 10
-  KWARGS_STAR_STAR = 11
-  ASSIGN_OPERATOR = 12
-  DICTIONARY_KEY = 13
-  DICTIONARY_KEY_PART = 14
-  DICTIONARY_VALUE = 15
-  DICT_SET_GENERATOR = 16
-  COMP_EXPR = 17
-  COMP_FOR = 18
-  COMP_IF = 19
-  FUNC_DEF = 20
-  DECORATOR = 21
-  TYPED_NAME = 22
-  TYPED_NAME_ARG_LIST = 23
-  SIMPLE_EXPRESSION = 24
-  PARAMETER_START = 25
-  PARAMETER_STOP = 26
+_OPENING_BRACKETS = frozenset({'(', '[', '{'})
+_CLOSING_BRACKETS = frozenset({')', ']', '}'})
 
 
 def _TabbedContinuationAlignPadding(spaces, align_style, tab_width):
@@ -82,17 +49,17 @@ def _TabbedContinuationAlignPadding(spaces, align_style, tab_width):
 
 
 class FormatToken(object):
-  """A wrapper around pytree Leaf nodes.
+  """Enhanced token information for formatting.
 
   This represents the token plus additional information useful for reformatting
   the code.
 
   Attributes:
-    node: The PyTree node this token represents.
-    next_token: The token in the unwrapped line after this token or None if this
-      is the last token in the unwrapped line.
-    previous_token: The token in the unwrapped line before this token or None if
-      this is the first token in the unwrapped line.
+    node: The original token node.
+    next_token: The token in the logical line after this token or None if this
+      is the last token in the logical line.
+    previous_token: The token in the logical line before this token or None if
+      this is the first token in the logical line.
     matching_bracket: If a bracket token ('[', '{', or '(') the matching
       bracket.
     parameters: If this and its following tokens make up a parameter list, then
@@ -108,7 +75,7 @@ class FormatToken(object):
       formatter won't place n spaces before all comments. Only those that are
       moved to the end of a line of code. The formatter may use different
       spacing when appropriate.
-    total_length: The total length of the unwrapped line up to and including
+    total_length: The total length of the logical line up to and including
       whitespace and this token. However, this doesn't include the initial
       indentation amount.
     split_penalty: The penalty for splitting the line before this token.
@@ -117,13 +84,23 @@ class FormatToken(object):
     newlines: The number of newlines needed before this token.
   """
 
-  def __init__(self, node):
+  def __init__(self, node, name):
     """Constructor.
 
     Arguments:
       node: (pytree.Leaf) The node that's being wrapped.
+      name: (string) The name of the node.
     """
     self.node = node
+    self.name = name
+    self.type = node.type
+    self.column = node.column
+    self.lineno = node.lineno
+    self.value = node.value
+
+    if self.is_continuation:
+      self.value = node.value.rstrip()
+
     self.next_token = None
     self.previous_token = None
     self.matching_bracket = None
@@ -138,25 +115,15 @@ class FormatToken(object):
         node, pytree_utils.Annotation.MUST_SPLIT, default=False)
     self.newlines = pytree_utils.GetNodeAnnotation(
         node, pytree_utils.Annotation.NEWLINES)
-
-    self.type = node.type
-    self.column = node.column
-    self.lineno = node.lineno
-
     self.spaces_required_before = 0
+
     if self.is_comment:
       self.spaces_required_before = style.Get('SPACES_BEFORE_COMMENT')
 
-    self.value = node.value
-    if self.is_continuation:
-      self.value = node.value.rstrip()
-
-    subtypes = pytree_utils.GetNodeAnnotation(node,
-                                              pytree_utils.Annotation.SUBTYPE)
-    self.subtypes = [Subtype.NONE] if subtypes is None else subtypes
-    self.name = pytree_utils.NodeName(node)
+    stypes = pytree_utils.GetNodeAnnotation(node,
+                                            pytree_utils.Annotation.SUBTYPE)
+    self.subtypes = {subtypes.NONE} if not stypes else stypes
     self.is_pseudo = hasattr(node, 'is_pseudo') and node.is_pseudo
-    self.is_docstring = self.is_multiline_string and not node.prev_sibling
 
   @property
   def formatted_whitespace_prefix(self):
@@ -230,7 +197,7 @@ class FormatToken(object):
       return
 
     cur_column = self.column
-    prev_column = previous.node.column
+    prev_column = previous.column
     prev_len = len(previous.value)
 
     if previous.is_pseudo and previous.value == ')':
@@ -245,14 +212,19 @@ class FormatToken(object):
     self.spaces_required_before = cur_column - (prev_column + prev_len)
 
   def OpensScope(self):
-    return self.value in pytree_utils.OPENING_BRACKETS
+    return self.value in _OPENING_BRACKETS
 
   def ClosesScope(self):
-    return self.value in pytree_utils.CLOSING_BRACKETS
+    return self.value in _CLOSING_BRACKETS
+
+  def AddSubtype(self, subtype):
+    self.subtypes.add(subtype)
 
   def __repr__(self):
-    msg = 'FormatToken(name={0}, value={1}, lineno={2}'.format(
-        self.name, self.value, self.lineno)
+    msg = ('FormatToken(name={0}, value={1}, column={2}, lineno={3}, '
+           'splitpenalty={4}'.format(
+               'DOCSTRING' if self.is_docstring else self.name, self.value,
+               self.column, self.lineno, self.split_penalty))
     msg += ', pseudo)' if self.is_pseudo else ')'
     return msg
 
@@ -265,32 +237,37 @@ class FormatToken(object):
   @property
   def is_binary_op(self):
     """Token is a binary operator."""
-    return Subtype.BINARY_OPERATOR in self.subtypes
+    return subtypes.BINARY_OPERATOR in self.subtypes
 
   @property
-  def is_a_expr_op(self):
-    """Token is an a_expr operator."""
-    return Subtype.A_EXPR_OPERATOR in self.subtypes
-
-  @property
-  def is_m_expr_op(self):
-    """Token is an m_expr operator."""
-    return Subtype.M_EXPR_OPERATOR in self.subtypes
-
-  @property
+  @py3compat.lru_cache()
   def is_arithmetic_op(self):
     """Token is an arithmetic operator."""
-    return self.is_a_expr_op or self.is_m_expr_op
+    return self.value in frozenset({
+        '+',  # Add
+        '-',  # Subtract
+        '*',  # Multiply
+        '@',  # Matrix Multiply
+        '/',  # Divide
+        '//',  # Floor Divide
+        '%',  # Modulo
+        '<<',  # Left Shift
+        '>>',  # Right Shift
+        '|',  # Bitwise Or
+        '&',  # Bitwise Add
+        '^',  # Bitwise Xor
+        '**',  # Power
+    })
 
   @property
   def is_simple_expr(self):
     """Token is an operator in a simple expression."""
-    return Subtype.SIMPLE_EXPRESSION in self.subtypes
+    return subtypes.SIMPLE_EXPRESSION in self.subtypes
 
   @property
   def is_subscript_colon(self):
     """Token is a subscript colon."""
-    return Subtype.SUBSCRIPT_COLON in self.subtypes
+    return subtypes.SUBSCRIPT_COLON in self.subtypes
 
   @property
   def is_comment(self):
@@ -329,6 +306,10 @@ class FormatToken(object):
       double or triple single quote mark.
     """
     return self.is_string and self.value.endswith(('"""', "'''"))
+
+  @property
+  def is_docstring(self):
+    return self.is_string and self.previous_token is None
 
   @property
   def is_pylint_comment(self):

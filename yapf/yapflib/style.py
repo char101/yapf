@@ -392,7 +392,7 @@ _STYLE_HELP = dict(
     SPLIT_PENALTY_EXCESS_CHARACTER=textwrap.dedent("""\
       The penalty for characters over the column limit."""),
     SPLIT_PENALTY_FOR_ADDED_LINE_SPLIT=textwrap.dedent("""\
-      The penalty incurred by adding a line split to the unwrapped line. The
+      The penalty incurred by adding a line split to the logical line. The
       more line splits added the higher the penalty."""),
     SPLIT_PENALTY_IMPORT_NAMES=textwrap.dedent("""\
       The penalty of splitting a list of "import as" names. For example:
@@ -746,17 +746,18 @@ def _CreateConfigParserFromConfigFile(config_filename):
     # Provide a more meaningful error here.
     raise StyleConfigError(
         '"{0}" is not a valid style or file path'.format(config_filename))
-  with open(config_filename) as style_file:
-    config = py3compat.ConfigParser()
-    if config_filename.endswith(PYPROJECT_TOML):
-      try:
-        import toml
-      except ImportError:
-        raise errors.YapfError(
-            "toml package is needed for using pyproject.toml as a "
-            "configuration file")
+  config = py3compat.ConfigParser()
 
-      pyproject_toml = toml.load(style_file)
+  if config_filename.endswith(PYPROJECT_TOML):
+    try:
+      import tomli as tomllib
+    except ImportError:
+      raise errors.YapfError(
+          "tomli package is needed for using pyproject.toml as a "
+          "configuration file")
+
+    with open(config_filename, 'rb') as style_file:
+      pyproject_toml = tomllib.load(style_file)
       style_dict = pyproject_toml.get("tool", {}).get("yapf", None)
       if style_dict is None:
         raise StyleConfigError(
@@ -766,7 +767,9 @@ def _CreateConfigParserFromConfigFile(config_filename):
         config.set('style', k, str(v))
       return config
 
+  with open(config_filename) as style_file:
     config.read_file(style_file)
+
     if config_filename.endswith(SETUP_CONFIG):
       if not config.has_section('yapf'):
         raise StyleConfigError(

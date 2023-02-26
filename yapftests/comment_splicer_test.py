@@ -16,9 +16,10 @@
 import textwrap
 import unittest
 
-from yapf.yapflib import comment_splicer
+from yapf.pytree import pytree_utils
+from yapf.pytree import comment_splicer
+
 from yapf.yapflib import py3compat
-from yapf.yapflib import pytree_utils
 
 
 class CommentSplicerTest(unittest.TestCase):

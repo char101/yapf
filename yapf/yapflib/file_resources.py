@@ -21,8 +21,7 @@ import fnmatch
 import os
 import re
 
-from ..ylib2to3.pgen2 import tokenize
-
+from yapf.ylib2to3.pgen2 import tokenize
 from yapf.yapflib import errors
 from yapf.yapflib import py3compat
 from yapf.yapflib import style
@@ -51,14 +50,15 @@ def _GetExcludePatternsFromPyprojectToml(filename):
   """Get a list of file patterns to ignore from pyproject.toml."""
   ignore_patterns = []
   try:
-    import toml
+    import tomli as tomllib
   except ImportError:
     raise errors.YapfError(
-        "toml package is needed for using pyproject.toml as a "
+        "tomli package is needed for using pyproject.toml as a "
         "configuration file")
 
   if os.path.isfile(filename) and os.access(filename, os.R_OK):
-    pyproject_toml = toml.load(filename)
+    with open(filename, 'rb') as fd:
+      pyproject_toml = tomllib.load(fd)
     ignore_patterns = pyproject_toml.get('tool',
                                          {}).get('yapfignore',
                                                  {}).get('ignore_patterns', [])
@@ -129,19 +129,19 @@ def GetDefaultStyleForDir(dirname, default_style=style.DEFAULT_STYLE):
     # See if we have a pyproject.toml file with a '[tool.yapf]'  section.
     config_file = os.path.join(dirname, style.PYPROJECT_TOML)
     try:
-      fd = open(config_file)
+      fd = open(config_file, 'rb')
     except IOError:
       pass  # It's okay if it's not there.
     else:
       with fd:
         try:
-          import toml
+          import tomli as tomllib
         except ImportError:
           raise errors.YapfError(
-              "toml package is needed for using pyproject.toml as a "
+              "tomli package is needed for using pyproject.toml as a "
               "configuration file")
 
-        pyproject_toml = toml.load(config_file)
+        pyproject_toml = tomllib.load(fd)
         style_dict = pyproject_toml.get('tool', {}).get('yapf', None)
         if style_dict is not None:
           return config_file
@@ -196,7 +196,7 @@ def LineEnding(lines):
       endings[CR] += 1
     elif line.endswith(LF):
       endings[LF] += 1
-  return (sorted(endings, key=endings.get, reverse=True) or [LF])[0]
+  return sorted((LF, CRLF, CR), key=endings.get, reverse=True)[0]
 
 
 def _FindPythonFiles(filenames, recursive, exclude):
@@ -264,7 +264,7 @@ def IsPythonFile(filename):
 
   try:
     with open(filename, 'rb') as fd:
-      encoding = tokenize.detect_encoding(fd.readline)[0]
+      encoding = py3compat.detect_encoding(fd.readline)[0]
 
     # Check for correctness of encoding.
     with py3compat.open_with_encoding(
@@ -291,4 +291,4 @@ def IsPythonFile(filename):
 def FileEncoding(filename):
   """Return the file's encoding."""
   with open(filename, 'rb') as fd:
-    return tokenize.detect_encoding(fd.readline)[0]
+    return py3compat.detect_encoding(fd.readline)[0]

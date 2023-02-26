@@ -93,21 +93,22 @@ Usage
 
 Options::
 
-    usage: yapf [-h] [-v] [-d | -i] [-r | -l START-END] [-e PATTERN]
+    usage: yapf [-h] [-v] [-d | -i | -q] [-r | -l START-END] [-e PATTERN]
                 [--style STYLE] [--style-help] [--no-local-style] [-p]
                 [-vv]
-                [files [files ...]]
+                [files ...]
 
     Formatter for Python code.
 
     positional arguments:
-      files
+      files                 reads from stdin when no files are specified.
 
     optional arguments:
       -h, --help            show this help message and exit
-      -v, --version         show version number and exit
+      -v, --version         show program's version number and exit
       -d, --diff            print the diff for the fixed source
       -i, --in-place        make changes to files in place
+      -q, --quiet           output nothing and set return value
       -r, --recursive       run recursively over directories
       -l START-END, --lines START-END
                             range of lines to reformat, one-based
@@ -115,17 +116,18 @@ Options::
                             patterns for files to exclude from formatting
       --style STYLE         specify formatting style: either a style name (for
                             example "pep8" or "google"), or the name of a file
-                            with style settings. The default is pep8 unless a
+                            with style settings.  The default is pep8 unless a
                             .style.yapf or setup.cfg or pyproject.toml file
-                            located in the same directory as the source or one of
-                            its parent directories (for stdin, the current
+                            located in the same directory as the source or one
+                            of its parent directories (for stdin, the current
                             directory is used).
-      --style-help          show style settings and exit; this output can be saved
-                            to .style.yapf to make your settings permanent
+      --style-help          show style settings and exit; this output can be
+                            saved to .style.yapf to make your settings
+                            permanent
       --no-local-style      don't search for local style definition
-      -p, --parallel        Run yapf in parallel when formatting multiple files.
-                            Requires concurrent.futures in Python 2.X
-      -vv, --verbose        Print out file names while processing
+      -p, --parallel        run YAPF in parallel when formatting multiple
+                            files. Requires concurrent.futures in Python 2.X
+      -vv, --verbose        print out file names while processing
 
 
 ------------
@@ -138,9 +140,9 @@ If ``--diff`` is supplied, YAPF returns zero when no changes were necessary, non
 otherwise (including program error). You can use this in a CI workflow to test that code
 has been YAPF-formatted.
 
----------------------------------------------
+---------------------------------------------------------------
 Excluding files from formatting (.yapfignore or pyproject.toml)
----------------------------------------------
+---------------------------------------------------------------
 
 In addition to exclude patterns provided on commandline, YAPF looks for additional
 patterns specified in a file named ``.yapfignore`` or ``pyproject.toml`` located in the
@@ -155,7 +157,7 @@ working directory from which YAPF is invoked.
 
 Note that no entry should begin with `./`.
 
-If you use ``pyproject.toml``, exclude patterns are specified by ``ignore_pattens`` key
+If you use ``pyproject.toml``, exclude patterns are specified by ``ignore_patterns`` key
 in ``[tool.yapfignore]`` section. For example:
 
 .. code-block:: ini
@@ -276,7 +278,7 @@ and reformat it into:
 Example as a module
 ===================
 
-The two main APIs for calling yapf are ``FormatCode`` and ``FormatFile``, these
+The two main APIs for calling YAPF are ``FormatCode`` and ``FormatFile``, these
 share several arguments which are described below:
 
 .. code-block:: python
@@ -386,7 +388,7 @@ Options::
                             located in the same directory as the source or one of
                             its parent directories (for stdin, the current
                             directory is used).
-      --binary BINARY       location of binary to use for yapf
+      --binary BINARY       location of binary to use for YAPF
 
 Knobs
 =====
@@ -846,7 +848,7 @@ Knobs
     The penalty for characters over the column limit.
 
 ``SPLIT_PENALTY_FOR_ADDED_LINE_SPLIT``
-    The penalty incurred by adding a line split to the unwrapped line. The more
+    The penalty incurred by adding a line split to the logical line. The more
     line splits added the higher the penalty.
 
 ``SPLIT_PENALTY_IMPORT_NAMES``
@@ -965,15 +967,15 @@ Gory Details
 Algorithm Design
 ----------------
 
-The main data structure in YAPF is the ``UnwrappedLine`` object. It holds a list
-of ``FormatToken``\s, that we would want to place on a single line if there were
-no column limit. An exception being a comment in the middle of an expression
-statement will force the line to be formatted on more than one line. The
-formatter works on one ``UnwrappedLine`` object at a time.
+The main data structure in YAPF is the ``LogicalLine`` object. It holds a list
+of ``FormatToken``\s, that we would want to place on a single line if there
+were no column limit. An exception being a comment in the middle of an
+expression statement will force the line to be formatted on more than one line.
+The formatter works on one ``LogicalLine`` object at a time.
 
-An ``UnwrappedLine`` typically won't affect the formatting of lines before or
+An ``LogicalLine`` typically won't affect the formatting of lines before or
 after it. There is a part of the algorithm that may join two or more
-``UnwrappedLine``\s into one line. For instance, an if-then statement with a
+``LogicalLine``\s into one line. For instance, an if-then statement with a
 short body can be placed on a single line:
 
 .. code-block:: python

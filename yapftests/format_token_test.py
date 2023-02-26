@@ -66,21 +66,27 @@ class TabbedContinuationAlignPaddingTest(unittest.TestCase):
 class FormatTokenTest(unittest.TestCase):
 
   def testSimple(self):
-    tok = format_token.FormatToken(pytree.Leaf(token.STRING, "'hello world'"))
-    self.assertEqual("FormatToken(name=STRING, value='hello world', lineno=0)",
-                     str(tok))
+    tok = format_token.FormatToken(
+        pytree.Leaf(token.STRING, "'hello world'"), 'STRING')
+    self.assertEqual(
+        "FormatToken(name=DOCSTRING, value='hello world', column=0, "
+        "lineno=0, splitpenalty=0)", str(tok))
     self.assertTrue(tok.is_string)
 
-    tok = format_token.FormatToken(pytree.Leaf(token.COMMENT, '# A comment'))
-    self.assertEqual('FormatToken(name=COMMENT, value=# A comment, lineno=0)',
-                     str(tok))
+    tok = format_token.FormatToken(
+        pytree.Leaf(token.COMMENT, '# A comment'), 'COMMENT')
+    self.assertEqual(
+        'FormatToken(name=COMMENT, value=# A comment, column=0, '
+        'lineno=0, splitpenalty=0)', str(tok))
     self.assertTrue(tok.is_comment)
 
   def testIsMultilineString(self):
-    tok = format_token.FormatToken(pytree.Leaf(token.STRING, '"""hello"""'))
+    tok = format_token.FormatToken(
+        pytree.Leaf(token.STRING, '"""hello"""'), 'STRING')
     self.assertTrue(tok.is_multiline_string)
 
-    tok = format_token.FormatToken(pytree.Leaf(token.STRING, 'r"""hello"""'))
+    tok = format_token.FormatToken(
+        pytree.Leaf(token.STRING, 'r"""hello"""'), 'STRING')
     self.assertTrue(tok.is_multiline_string)
 
 

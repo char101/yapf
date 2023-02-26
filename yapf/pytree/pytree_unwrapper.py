@@ -11,13 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTreeUnwrapper - produces a list of unwrapped lines from a pytree.
+"""PyTreeUnwrapper - produces a list of logical lines from a pytree.
 
-[for a description of what an unwrapped line is, see unwrapped_line.py]
+[for a description of what a logical line is, see logical_line.py]
 
 This is a pytree visitor that goes over a parse tree and produces a list of
-UnwrappedLine containers from it, each with its own depth and containing all
-the tokens that could fit on the line if there were no maximal line-length
+LogicalLine containers from it, each with its own depth and containing all the
+tokens that could fit on the line if there were no maximal line-length
 limitations.
 
 Note: a precondition to running this visitor and obtaining correct results is
@@ -31,29 +31,33 @@ For most uses, the convenience function UnwrapPyTree should be sufficient.
 from ..ylib2to3 import pytree
 from ..ylib2to3.pgen2 import token as grammar_token
 
+from yapf.pytree import pytree_utils
+from yapf.pytree import pytree_visitor
+from yapf.pytree import split_penalty
 from yapf.yapflib import format_token
+from yapf.yapflib import logical_line
 from yapf.yapflib import object_state
-from yapf.yapflib import pytree_utils
-from yapf.yapflib import pytree_visitor
-from yapf.yapflib import split_penalty
 from yapf.yapflib import style
-from yapf.yapflib import unwrapped_line
+from yapf.yapflib import subtypes
+
+_OPENING_BRACKETS = frozenset({'(', '[', '{'})
+_CLOSING_BRACKETS = frozenset({')', ']', '}'})
 
 
 def UnwrapPyTree(tree):
-  """Create and return a list of unwrapped lines from the given pytree.
+  """Create and return a list of logical lines from the given pytree.
 
   Arguments:
-    tree: the top-level pytree node to unwrap.
+    tree: the top-level pytree node to unwrap..
 
   Returns:
-    A list of UnwrappedLine objects.
+    A list of LogicalLine objects.
   """
   unwrapper = PyTreeUnwrapper()
   unwrapper.Visit(tree)
-  uwlines = unwrapper.GetUnwrappedLines()
-  uwlines.sort(key=lambda x: x.lineno)
-  return uwlines
+  llines = unwrapper.GetLogicalLines()
+  llines.sort(key=lambda x: x.lineno)
+  return llines
 
 
 # Grammar tokens considered as whitespace for the purpose of unwrapping.
@@ -79,40 +83,40 @@ class PyTreeUnwrapper(pytree_visitor.PyTreeVisitor):
   """
 
   def __init__(self):
-    # A list of all unwrapped lines finished visiting so far.
-    self._unwrapped_lines = []
+    # A list of all logical lines finished visiting so far.
+    self._logical_lines = []
 
-    # Builds up a "current" unwrapped line while visiting pytree nodes. Some
-    # nodes will finish a line and start a new one.
-    self._cur_unwrapped_line = unwrapped_line.UnwrappedLine(0)
+    # Builds up a "current" logical line while visiting pytree nodes. Some nodes
+    # will finish a line and start a new one.
+    self._cur_logical_line = logical_line.LogicalLine(0)
 
     # Current indentation depth.
     self._cur_depth = 0
 
-  def GetUnwrappedLines(self):
+  def GetLogicalLines(self):
     """Fetch the result of the tree walk.
 
     Note: only call this after visiting the whole tree.
 
     Returns:
-      A list of UnwrappedLine objects.
+      A list of LogicalLine objects.
     """
     # Make sure the last line that was being populated is flushed.
     self._StartNewLine()
-    return self._unwrapped_lines
+    return self._logical_lines
 
   def _StartNewLine(self):
     """Finish current line and start a new one.
 
-    Place the currently accumulated line into the _unwrapped_lines list and
+    Place the currently accumulated line into the _logical_lines list and
     start a new one.
     """
-    if self._cur_unwrapped_line.tokens:
-      self._unwrapped_lines.append(self._cur_unwrapped_line)
-      _MatchBrackets(self._cur_unwrapped_line)
-      _IdentifyParameterLists(self._cur_unwrapped_line)
-      _AdjustSplitPenalty(self._cur_unwrapped_line)
-    self._cur_unwrapped_line = unwrapped_line.UnwrappedLine(self._cur_depth)
+    if self._cur_logical_line.tokens:
+      self._logical_lines.append(self._cur_logical_line)
+      _MatchBrackets(self._cur_logical_line)
+      _IdentifyParameterLists(self._cur_logical_line)
+      _AdjustSplitPenalty(self._cur_logical_line)
+    self._cur_logical_line = logical_line.LogicalLine(self._cur_depth)
 
   _STMT_TYPES = frozenset({
       'if_stmt',
@@ -154,7 +158,7 @@ class PyTreeUnwrapper(pytree_visitor.PyTreeVisitor):
     """Helper for visiting compound statements.
 
     Python compound statements serve as containers for other statements. Thus,
-    when we encounter a new compound statement we start a new unwrapped line.
+    when we encounter a new compound statement, we start a new logical line.
 
     Arguments:
       node: the node to visit.
@@ -208,7 +212,7 @@ class PyTreeUnwrapper(pytree_visitor.PyTreeVisitor):
     for child in node.children:
       index += 1
       self.Visit(child)
-      if pytree_utils.NodeName(child) == 'ASYNC':
+      if child.type == grammar_token.ASYNC:
         break
     for child in node.children[index].children:
       self.Visit(child)
@@ -224,18 +228,17 @@ class PyTreeUnwrapper(pytree_visitor.PyTreeVisitor):
     for child in node.children:
       index += 1
       self.Visit(child)
-      if pytree_utils.NodeName(child) == 'ASYNC':
+      if child.type == grammar_token.ASYNC:
         break
     for child in node.children[index].children:
-      if pytree_utils.NodeName(child) == 'NAME' and child.value == 'else':
+      if child.type == grammar_token.NAME and child.value == 'else':
         self._StartNewLine()
       self.Visit(child)
 
   def Visit_decorator(self, node):  # pylint: disable=invalid-name
     for child in node.children:
       self.Visit(child)
-      if (pytree_utils.NodeName(child) == 'COMMENT' and
-          child == node.children[0]):
+      if child.type == grammar_token.COMMENT and child == node.children[0]:
         self._StartNewLine()
 
   def Visit_decorators(self, node):  # pylint: disable=invalid-name
@@ -299,10 +302,14 @@ class PyTreeUnwrapper(pytree_visitor.PyTreeVisitor):
     _DetermineMustSplitAnnotation(node)
     self.DefaultNodeVisit(node)
 
+  def Visit_subscriptlist(self, node):  # pylint: disable=invalid-name
+    _DetermineMustSplitAnnotation(node)
+    self.DefaultNodeVisit(node)
+
   def DefaultLeafVisit(self, leaf):
     """Default visitor for tree leaves.
 
-    A tree leaf is always just gets appended to the current unwrapped line.
+    A tree leaf is always just gets appended to the current logical line.
 
     Arguments:
       leaf: the leaf to visit.
@@ -311,13 +318,14 @@ class PyTreeUnwrapper(pytree_visitor.PyTreeVisitor):
       self._StartNewLine()
     elif leaf.type != grammar_token.COMMENT or leaf.value.strip():
       # Add non-whitespace tokens and comments that aren't empty.
-      self._cur_unwrapped_line.AppendNode(leaf)
+      self._cur_logical_line.AppendToken(
+          format_token.FormatToken(leaf, pytree_utils.NodeName(leaf)))
 
 
 _BRACKET_MATCH = {')': '(', '}': '{', ']': '['}
 
 
-def _MatchBrackets(uwline):
+def _MatchBrackets(line):
   """Visit the node and match the brackets.
 
   For every open bracket ('[', '{', or '('), find the associated closing bracket
@@ -325,13 +333,13 @@ def _MatchBrackets(uwline):
   or close bracket.
 
   Arguments:
-    uwline: (UnwrappedLine) An unwrapped line.
+    line: (LogicalLine) A logical line.
   """
   bracket_stack = []
-  for token in uwline.tokens:
-    if token.value in pytree_utils.OPENING_BRACKETS:
+  for token in line.tokens:
+    if token.value in _OPENING_BRACKETS:
       bracket_stack.append(token)
-    elif token.value in pytree_utils.CLOSING_BRACKETS:
+    elif token.value in _CLOSING_BRACKETS:
       bracket_stack[-1].matching_bracket = token
       token.matching_bracket = bracket_stack[-1]
       bracket_stack.pop()
@@ -342,20 +350,20 @@ def _MatchBrackets(uwline):
         token.container_opening = bracket
 
 
-def _IdentifyParameterLists(uwline):
+def _IdentifyParameterLists(line):
   """Visit the node to create a state for parameter lists.
 
   For instance, a parameter is considered an "object" with its first and last
   token uniquely identifying the object.
 
   Arguments:
-    uwline: (UnwrappedLine) An unwrapped line.
+    line: (LogicalLine) A logical line.
   """
   func_stack = []
   param_stack = []
-  for tok in uwline.tokens:
+  for tok in line.tokens:
     # Identify parameter list objects.
-    if format_token.Subtype.FUNC_DEF in tok.subtypes:
+    if subtypes.FUNC_DEF in tok.subtypes:
       assert tok.next_token.value == '('
       func_stack.append(tok.next_token)
       continue
@@ -366,33 +374,33 @@ def _IdentifyParameterLists(uwline):
       continue
 
     # Identify parameter objects.
-    if format_token.Subtype.PARAMETER_START in tok.subtypes:
+    if subtypes.PARAMETER_START in tok.subtypes:
       param_stack.append(tok)
 
     # Not "elif", a parameter could be a single token.
-    if param_stack and format_token.Subtype.PARAMETER_STOP in tok.subtypes:
+    if param_stack and subtypes.PARAMETER_STOP in tok.subtypes:
       start = param_stack.pop()
       func_stack[-1].parameters.append(object_state.Parameter(start, tok))
 
 
-def _AdjustSplitPenalty(uwline):
+def _AdjustSplitPenalty(line):
   """Visit the node and adjust the split penalties if needed.
 
   A token shouldn't be split if it's not within a bracket pair. Mark any token
   that's not within a bracket pair as "unbreakable".
 
   Arguments:
-    uwline: (UnwrappedLine) An unwrapped line.
+    line: (LogicalLine) An logical line.
   """
   bracket_level = 0
-  for index, token in enumerate(uwline.tokens):
+  for index, token in enumerate(line.tokens):
     if index and not bracket_level:
       pytree_utils.SetNodeAnnotation(token.node,
                                      pytree_utils.Annotation.SPLIT_PENALTY,
                                      split_penalty.UNBREAKABLE)
-    if token.value in pytree_utils.OPENING_BRACKETS:
+    if token.value in _OPENING_BRACKETS:
       bracket_level += 1
-    elif token.value in pytree_utils.CLOSING_BRACKETS:
+    elif token.value in _CLOSING_BRACKETS:
       bracket_level -= 1
 
 
@@ -403,8 +411,7 @@ def _DetermineMustSplitAnnotation(node):
   if not _ContainsComments(node):
     token = next(node.parent.leaves())
     if token.value == '(':
-      if sum(1 for ch in node.children
-             if pytree_utils.NodeName(ch) == 'COMMA') < 2:
+      if sum(1 for ch in node.children if ch.type == grammar_token.COMMA) < 2:
         return
     if (not isinstance(node.children[-1], pytree.Leaf) or
         node.children[-1].value != ','):

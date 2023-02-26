@@ -26,6 +26,7 @@ import unittest
 
 from lib2to3.pgen2 import tokenize
 
+from yapf.yapflib import errors
 from yapf.yapflib import py3compat
 from yapf.yapflib import style
 from yapf.yapflib import yapf_api
@@ -62,6 +63,7 @@ class FormatCodeTest(yapf_test_helper.YAPFTest):
         """)
     self._Check(unformatted_code, expected_formatted_code)
 
+  @unittest.skipUnless(py3compat.PY36, 'Requires Python 3.6')
   def testPrintAfterPeriod(self):
     unformatted_code = textwrap.dedent("""a.print\n""")
     expected_formatted_code = textwrap.dedent("""a.print\n""")
@@ -143,6 +145,29 @@ class FormatFileTest(unittest.TestCase):
         # yapf: disable
         if f:    g
         # yapf: enable
+
+        if h: i
+        """)
+    with utils.TempFileContents(self.test_tmpdir, unformatted_code) as filepath:
+      formatted_code, _, _ = yapf_api.FormatFile(filepath, style_config='pep8')
+      self.assertCodeEqual(expected_formatted_code, formatted_code)
+
+  def testFmtOnOff(self):
+    unformatted_code = textwrap.dedent(u"""\
+        if a:    b
+
+        # fmt: off
+        if f:    g
+        # fmt: on
+
+        if h:    i
+        """)
+    expected_formatted_code = textwrap.dedent(u"""\
+        if a: b
+
+        # fmt: off
+        if f:    g
+        # fmt: on
 
         if h: i
         """)
@@ -428,6 +453,7 @@ class CommandLineTest(unittest.TestCase):
     self.assertEqual(stderrdata, b'')
     self.assertMultiLineEqual(reformatted_code.decode('utf-8'), expected)
 
+  @unittest.skipUnless(py3compat.PY36, 'Requires Python 3.6')
   def testUnicodeEncodingPipedToFile(self):
     unformatted_code = textwrap.dedent(u"""\
         def foo():
@@ -464,6 +490,31 @@ class CommandLineTest(unittest.TestCase):
       p = subprocess.Popen(YAPF_BINARY + ['--in-place', filepath])
       p.wait()
       with io.open(filepath, mode='r', encoding='utf-8', newline='') as fd:
+        reformatted_code = fd.read()
+    self.assertEqual(reformatted_code, expected_formatted_code)
+
+  def testInPlaceReformattingWindowsNewLine(self):
+    unformatted_code = u'\r\n\r\n'
+    expected_formatted_code = u'\r\n'
+    with utils.TempFileContents(
+        self.test_tmpdir, unformatted_code, suffix='.py') as filepath:
+      p = subprocess.Popen(YAPF_BINARY + ['--in-place', filepath])
+      p.wait()
+      with io.open(filepath, mode='r', encoding='utf-8', newline='') as fd:
+        reformatted_code = fd.read()
+    self.assertEqual(reformatted_code, expected_formatted_code)
+
+  def testInPlaceReformattingNoNewLine(self):
+    unformatted_code = textwrap.dedent(u"def foo(): x = 37")
+    expected_formatted_code = textwrap.dedent("""\
+        def foo():
+            x = 37
+        """)
+    with utils.TempFileContents(
+        self.test_tmpdir, unformatted_code, suffix='.py') as filepath:
+      p = subprocess.Popen(YAPF_BINARY + ['--in-place', filepath])
+      p.wait()
+      with io.open(filepath, mode='r', newline='') as fd:
         reformatted_code = fd.read()
     self.assertEqual(reformatted_code, expected_formatted_code)
 
@@ -1560,11 +1611,11 @@ class BadInputTest(unittest.TestCase):
 
   def testBadSyntax(self):
     code = '  a = 1\n'
-    self.assertRaises(SyntaxError, yapf_api.FormatCode, code)
+    self.assertRaises(errors.YapfError, yapf_api.FormatCode, code)
 
   def testBadCode(self):
     code = 'x = """hello\n'
-    self.assertRaises(tokenize.TokenError, yapf_api.FormatCode, code)
+    self.assertRaises(errors.YapfError, yapf_api.FormatCode, code)
 
 
 class DiffIndentTest(unittest.TestCase):

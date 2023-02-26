@@ -11,25 +11,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""UnwrappedLine primitive for formatting.
+"""LogicalLine primitive for formatting.
 
-An unwrapped line is the containing data structure produced by the parser. It
-collects all nodes (stored in FormatToken objects) that could appear on a
-single line if there were no line length restrictions. It's then used by the
-parser to perform the wrapping required to comply with the style guide.
+A logical line is the containing data structure produced by the parser. It
+collects all nodes (stored in FormatToken objects) that could appear on a single
+line if there were no line length restrictions. It's then used by the parser to
+perform the wrapping required to comply with the style guide.
 """
 
+from yapf.pytree import pytree_utils
+from yapf.pytree import split_penalty
 from yapf.yapflib import format_token
 from yapf.yapflib import py3compat
-from yapf.yapflib import pytree_utils
-from yapf.yapflib import split_penalty
 from yapf.yapflib import style
+from yapf.yapflib import subtypes
 
 from ..ylib2to3.fixer_util import syms as python_symbols
 
 
-class UnwrappedLine(object):
-  """Represents a single unwrapped line in the output.
+class LogicalLine(object):
+  """Represents a single logical line in the output.
 
   Attributes:
     depth: indentation depth of this line. This is just a numeric value used to
@@ -40,7 +41,7 @@ class UnwrappedLine(object):
   def __init__(self, depth, tokens=None):
     """Constructor.
 
-    Creates a new unwrapped line with the given depth an initial list of tokens.
+    Creates a new logical line with the given depth an initial list of tokens.
     Constructs the doubly-linked lists for format tokens using their built-in
     next_token and previous_token attributes.
 
@@ -62,7 +63,7 @@ class UnwrappedLine(object):
   def CalculateFormattingInformation(self):
     """Calculate the split penalty and total length for the tokens."""
     # Say that the first token in the line should have a space before it. This
-    # means only that if this unwrapped line is joined with a predecessor line,
+    # means only that if this logical line is joined with a predecessor line,
     # then there will be a space between them.
     self.first.spaces_required_before = 1
     self.first.total_length = len(self.first.value)
@@ -105,23 +106,23 @@ class UnwrappedLine(object):
     if not self.has_semicolon or self.disable:
       return [self]
 
-    uwlines = []
-    uwline = UnwrappedLine(self.depth)
+    llines = []
+    lline = LogicalLine(self.depth)
     for tok in self._tokens:
       if tok.value == ';':
-        uwlines.append(uwline)
-        uwline = UnwrappedLine(self.depth)
+        llines.append(lline)
+        lline = LogicalLine(self.depth)
       else:
-        uwline.AppendToken(tok)
+        lline.AppendToken(tok)
 
-    if uwline.tokens:
-      uwlines.append(uwline)
+    if lline.tokens:
+      llines.append(lline)
 
-    for uwline in uwlines:
-      uwline.first.previous_token = None
-      uwline.last.next_token = None
+    for lline in llines:
+      lline.first.previous_token = None
+      lline.last.next_token = None
 
-    return uwlines
+    return llines
 
   ############################################################################
   # Token Access and Manipulation Methods                                    #
@@ -133,16 +134,6 @@ class UnwrappedLine(object):
       token.previous_token = self.last
       self.last.next_token = token
     self._tokens.append(token)
-
-  def AppendNode(self, node):
-    """Convenience method to append a pytree node directly.
-
-    Wraps the node with a FormatToken.
-
-    Arguments:
-      node: the node to append
-    """
-    self.AppendToken(format_token.FormatToken(node))
 
   @property
   def first(self):
@@ -168,7 +159,7 @@ class UnwrappedLine(object):
     have spaces around them, for example).
 
     Arguments:
-      indent_per_depth: how much spaces to indend per depth level.
+      indent_per_depth: how much spaces to indent per depth level.
 
     Returns:
       A string representing the line as code.
@@ -183,7 +174,7 @@ class UnwrappedLine(object):
   def __repr__(self):  # pragma: no cover
     tokens_repr = ','.join(
         '{0}({1!r})'.format(tok.name, tok.value) for tok in self._tokens)
-    return 'UnwrappedLine(depth={0}, tokens=[{1}])'.format(
+    return 'LogicalLine(depth={0}, tokens=[{1}])'.format(
         self.depth, tokens_repr)
 
   ############################################################################
@@ -203,12 +194,30 @@ class UnwrappedLine(object):
 
   @property
   def lineno(self):
-    """Return the line number of this unwrapped line.
+    """Return the line number of this logical line.
 
     Returns:
-      The line number of the first token in this unwrapped line.
+      The line number of the first token in this logical line.
     """
     return self.first.lineno
+
+  @property
+  def start(self):
+    """The start of the logical line.
+
+    Returns:
+      A tuple of the starting line number and column.
+    """
+    return (self.first.lineno, self.first.column)
+
+  @property
+  def end(self):
+    """The end of the logical line.
+
+    Returns:
+      A tuple of the ending line number and column.
+    """
+    return (self.last.lineno, self.last.column + len(self.last.value))
 
   @property
   def is_comment(self):
@@ -224,7 +233,7 @@ def _IsIdNumberStringToken(tok):
 
 
 def _IsUnaryOperator(tok):
-  return format_token.Subtype.UNARY_OPERATOR in tok.subtypes
+  return subtypes.UNARY_OPERATOR in tok.subtypes
 
 
 def _HasPrecedence(tok):
@@ -293,9 +302,9 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
     return True
   if style.Get('SPACE_INSIDE_BRACKETS'):
     # Supersede the "no space before a colon or comma" check.
-    if lval in pytree_utils.OPENING_BRACKETS and rval == ':':
+    if left.OpensScope() and rval == ':':
       return True
-    if rval in pytree_utils.CLOSING_BRACKETS and lval == ':':
+    if right.ClosesScope() and lval == ':':
       return True
   if (style.Get('SPACES_AROUND_SUBSCRIPT_COLON') and
       (_IsSubscriptColonAndValuePair(left, right) or
@@ -318,7 +327,7 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
     # Space after the '.' in an import statement.
     return True
   if (lval == '=' and rval in {'.', ',,,'} and
-      format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN not in left.subtypes):
+      subtypes.DEFAULT_OR_NAMED_ASSIGN not in left.subtypes):
     # Space between equal and '.' as in "X = ...".
     return True
   if lval == ':' and rval in {'.', '...'}:
@@ -328,17 +337,17 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
       (left.is_keyword or left.is_name)):
     # Don't merge two keywords/identifiers.
     return True
-  if (format_token.Subtype.SUBSCRIPT_COLON in left.subtypes or
-      format_token.Subtype.SUBSCRIPT_COLON in right.subtypes):
+  if (subtypes.SUBSCRIPT_COLON in left.subtypes or
+      subtypes.SUBSCRIPT_COLON in right.subtypes):
     # A subscript shouldn't have spaces separating its colons.
     return False
-  if (format_token.Subtype.TYPED_NAME in left.subtypes or
-      format_token.Subtype.TYPED_NAME in right.subtypes):
+  if (subtypes.TYPED_NAME in left.subtypes or
+      subtypes.TYPED_NAME in right.subtypes):
     # A typed argument should have a space after the colon.
     return True
   if left.is_string:
-    if (rval == '=' and format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN_ARG_LIST
-        in right.subtypes):
+    if (rval == '=' and
+        subtypes.DEFAULT_OR_NAMED_ASSIGN_ARG_LIST in right.subtypes):
       # If there is a type hint, then we don't want to add a space between the
       # equal sign and the hint.
       return False
@@ -346,12 +355,12 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
       # A string followed by something other than a subscript, closing bracket,
       # dot, or a binary op should have a space after it.
       return True
-    if rval in pytree_utils.CLOSING_BRACKETS:
+    if right.ClosesScope():
       # A string followed by closing brackets should have a space after it
       # depending on SPACE_INSIDE_BRACKETS.  A string followed by opening
       # brackets, however, should not.
       return style.Get('SPACE_INSIDE_BRACKETS')
-    if format_token.Subtype.SUBSCRIPT_BRACKET in right.subtypes:
+    if subtypes.SUBSCRIPT_BRACKET in right.subtypes:
       # It's legal to do this in Python: 'hello'[a]
       return False
   if left.is_binary_op and lval != '**' and _IsUnaryOperator(right):
@@ -383,22 +392,22 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
     # The previous token was a unary op. No space is desired between it and
     # the current token.
     return False
-  if (format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN in left.subtypes and
-      format_token.Subtype.TYPED_NAME not in right.subtypes):
+  if (subtypes.DEFAULT_OR_NAMED_ASSIGN in left.subtypes and
+      subtypes.TYPED_NAME not in right.subtypes):
     # A named argument or default parameter shouldn't have spaces around it.
     return style.Get('SPACES_AROUND_DEFAULT_OR_NAMED_ASSIGN')
-  if (format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN in right.subtypes and
-      format_token.Subtype.TYPED_NAME not in left.subtypes):
+  if (subtypes.DEFAULT_OR_NAMED_ASSIGN in right.subtypes and
+      subtypes.TYPED_NAME not in left.subtypes):
     # A named argument or default parameter shouldn't have spaces around it.
     return style.Get('SPACES_AROUND_DEFAULT_OR_NAMED_ASSIGN')
-  if (format_token.Subtype.VARARGS_LIST in left.subtypes or
-      format_token.Subtype.VARARGS_LIST in right.subtypes):
+  if (subtypes.VARARGS_LIST in left.subtypes or
+      subtypes.VARARGS_LIST in right.subtypes):
     return False
-  if (format_token.Subtype.VARARGS_STAR in left.subtypes or
-      format_token.Subtype.KWARGS_STAR_STAR in left.subtypes):
+  if (subtypes.VARARGS_STAR in left.subtypes or
+      subtypes.KWARGS_STAR_STAR in left.subtypes):
     # Don't add a space after a vararg's star or a keyword's star-star.
     return False
-  if lval == '@' and format_token.Subtype.DECORATOR in left.subtypes:
+  if lval == '@' and subtypes.DECORATOR in left.subtypes:
     # Decorators shouldn't be separated from the 'at' sign.
     return False
   if left.is_keyword and rval == '.':
@@ -430,28 +439,26 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
         (rval == ')' and
          _IsDictListTupleDelimiterTok(right, is_opening=False)))):
       return True
-  if (lval in pytree_utils.OPENING_BRACKETS and
-      rval in pytree_utils.OPENING_BRACKETS):
+  if left.OpensScope() and right.OpensScope():
     # Nested objects' opening brackets shouldn't be separated, unless enabled
     # by SPACE_INSIDE_BRACKETS.
     return style.Get('SPACE_INSIDE_BRACKETS')
-  if (lval in pytree_utils.CLOSING_BRACKETS and
-      rval in pytree_utils.CLOSING_BRACKETS):
+  if left.ClosesScope() and right.ClosesScope():
     # Nested objects' closing brackets shouldn't be separated, unless enabled
     # by SPACE_INSIDE_BRACKETS.
     return style.Get('SPACE_INSIDE_BRACKETS')
-  if lval in pytree_utils.CLOSING_BRACKETS and rval in '([':
+  if left.ClosesScope() and rval in '([':
     # A call, set, dictionary, or subscript that has a call or subscript after
     # it shouldn't have a space between them.
     return False
-  if lval in pytree_utils.OPENING_BRACKETS and _IsIdNumberStringToken(right):
+  if left.OpensScope() and _IsIdNumberStringToken(right):
     # Don't separate the opening bracket from the first item, unless enabled
     # by SPACE_INSIDE_BRACKETS.
     return style.Get('SPACE_INSIDE_BRACKETS')
   if left.is_name and rval in '([':
     # Don't separate a call or array access from the name.
     return False
-  if rval in pytree_utils.CLOSING_BRACKETS:
+  if right.ClosesScope():
     # Don't separate the closing bracket from the last item, unless enabled
     # by SPACE_INSIDE_BRACKETS.
     # FIXME(morbo): This might be too permissive.
@@ -459,13 +466,12 @@ def _SpaceRequiredBetween(left, right, is_line_disabled):
   if lval == 'print' and rval == '(':
     # Special support for the 'print' function.
     return False
-  if lval in pytree_utils.OPENING_BRACKETS and _IsUnaryOperator(right):
+  if left.OpensScope() and _IsUnaryOperator(right):
     # Don't separate a unary operator from the opening bracket, unless enabled
     # by SPACE_INSIDE_BRACKETS.
     return style.Get('SPACE_INSIDE_BRACKETS')
-  if (lval in pytree_utils.OPENING_BRACKETS and
-      (format_token.Subtype.VARARGS_STAR in right.subtypes or
-       format_token.Subtype.KWARGS_STAR_STAR in right.subtypes)):
+  if (left.OpensScope() and (subtypes.VARARGS_STAR in right.subtypes or
+                             subtypes.KWARGS_STAR_STAR in right.subtypes)):
     # Don't separate a '*' or '**' from the opening bracket, unless enabled
     # by SPACE_INSIDE_BRACKETS.
     return style.Get('SPACE_INSIDE_BRACKETS')
@@ -526,12 +532,12 @@ def _CanBreakBefore(prev_token, cur_token):
   if cur_token.is_comment and prev_token.lineno == cur_token.lineno:
     # Don't break a comment at the end of the line.
     return False
-  if format_token.Subtype.UNARY_OPERATOR in prev_token.subtypes:
+  if subtypes.UNARY_OPERATOR in prev_token.subtypes:
     # Don't break after a unary token.
     return False
   if not style.Get('ALLOW_SPLIT_BEFORE_DEFAULT_OR_NAMED_ASSIGNS'):
-    if (format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN in cur_token.subtypes or
-        format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN in prev_token.subtypes):
+    if (subtypes.DEFAULT_OR_NAMED_ASSIGN in cur_token.subtypes or
+        subtypes.DEFAULT_OR_NAMED_ASSIGN in prev_token.subtypes):
       return False
   return True
 
@@ -635,11 +641,11 @@ def _SplitPenalty(prev_token, cur_token):
     if cval in _BITWISE_OPERATORS:
       return style.Get('SPLIT_PENALTY_BITWISE_OPERATOR')
 
-  if (format_token.Subtype.COMP_FOR in cur_token.subtypes or
-      format_token.Subtype.COMP_IF in cur_token.subtypes):
+  if (subtypes.COMP_FOR in cur_token.subtypes or
+      subtypes.COMP_IF in cur_token.subtypes):
     # We don't mind breaking before the 'for' or 'if' of a list comprehension.
     return 0
-  if format_token.Subtype.UNARY_OPERATOR in prev_token.subtypes:
+  if subtypes.UNARY_OPERATOR in prev_token.subtypes:
     # Try not to break after a unary operator.
     return style.Get('SPLIT_PENALTY_AFTER_UNARY_OPERATOR')
   if pval == ',':
@@ -647,8 +653,8 @@ def _SplitPenalty(prev_token, cur_token):
     return 0
   if pval == '**' or cval == '**':
     return split_penalty.STRONGLY_CONNECTED
-  if (format_token.Subtype.VARARGS_STAR in prev_token.subtypes or
-      format_token.Subtype.KWARGS_STAR_STAR in prev_token.subtypes):
+  if (subtypes.VARARGS_STAR in prev_token.subtypes or
+      subtypes.KWARGS_STAR_STAR in prev_token.subtypes):
     # Don't split after a varargs * or kwargs **.
     return split_penalty.UNBREAKABLE
   if prev_token.OpensScope() and cval != '(':
@@ -660,8 +666,8 @@ def _SplitPenalty(prev_token, cur_token):
   if cval == '=':
     # Don't split before an assignment.
     return split_penalty.UNBREAKABLE
-  if (format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN in prev_token.subtypes or
-      format_token.Subtype.DEFAULT_OR_NAMED_ASSIGN in cur_token.subtypes):
+  if (subtypes.DEFAULT_OR_NAMED_ASSIGN in prev_token.subtypes or
+      subtypes.DEFAULT_OR_NAMED_ASSIGN in cur_token.subtypes):
     # Don't break before or after an default or named assignment.
     return split_penalty.UNBREAKABLE
   if cval == '==':
