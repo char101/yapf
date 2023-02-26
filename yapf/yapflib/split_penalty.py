@@ -17,8 +17,8 @@ import re
 from yapf.ylib2to3 import pytree
 from yapf.yapflib import format_token
 from yapf.yapflib import py3compat
-from yapf.yapflib import pytree_utils
-from yapf.yapflib import pytree_visitor
+from yapf.pytree import pytree_utils
+from yapf.pytree import pytree_visitor
 from yapf.yapflib import style
 
 # Generic split penalties

@@ -24,15 +24,9 @@ Annotations:
       subtypes.
 """
 
-<<<<<<< HEAD:yapf/yapflib/subtype_assigner.py
-from ..ylib2to3 import pytree
-from ..ylib2to3.pgen2 import token
-from ..ylib2to3.pygram import python_symbols as syms
-=======
-from lib2to3 import pytree
-from lib2to3.pgen2 import token as grammar_token
-from lib2to3.pygram import python_symbols as syms
->>>>>>> main:yapf/pytree/subtype_assigner.py
+from yapf.ylib2to3 import pytree
+from yapf.ylib2to3.pgen2 import token as gammar_token
+from yapf.ylib2to3.pygram import python_symbols as syms
 
 from yapf.pytree import pytree_utils
 from yapf.pytree import pytree_visitor
