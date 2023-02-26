@@ -25,7 +25,7 @@ Annotations:
 """
 
 from yapf.ylib2to3 import pytree
-from yapf.ylib2to3.pgen2 import token as gammar_token
+from yapf.ylib2to3.pgen2 import token as grammar_token
 from yapf.ylib2to3.pygram import python_symbols as syms
 
 from yapf.pytree import pytree_utils
